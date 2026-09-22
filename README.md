@@ -4,19 +4,21 @@
 
 ## Установка на Android
 
-В **Revenge Classic → Settings → Plugins → +** вставь URL папки:
+В **Revenge Classic → Settings → Plugins → +** вставь URL **каталога плагина**:
 
 ```text
-https://raw.githubusercontent.com/Meldixx/Meldix-Chat-Archive/main/
+https://cdn.jsdelivr.net/gh/Meldixx/Meldix-Chat-Archive@main/
 ```
 
-Если GitHub Pages включён в Settings → Pages (main / root), можно также использовать:
+Revenge сам запрашивает из этого каталога `manifest.json` и `index.js`. Ссылка на `raw.githubusercontent.com/.../main/` **не работает**: GitHub RAW не раздаёт папку как сайт.
+
+Если владелец репозитория включит **Settings → Pages → Deploy from a branch → main / (root)**, можно использовать также:
 
 ```text
 https://meldixx.github.io/Meldix-Chat-Archive/
 ```
 
-**Это именно каталог, а не URL страницы GitHub с исходным кодом.** Для установки рядом должны находиться `manifest.json` и `index.js`. GitHub Pages не обязателен для прямой RAW-ссылки; на некоторых версиях Revenge способ загрузки может отличаться.
+GitHub Pages не включён и не проверен автоматически; эта ссылка будет работать только после публикации.
 
 ## Экспорт
 
@@ -37,4 +39,4 @@ https://meldixx.github.io/Meldix-Chat-Archive/
 - Выводы о чувствах человека **не делаются**. Тематические совпадения не доказывают значимость события.
 - Не выкладывай в репозиторий экспортированные переписки, личные данные и цитаты без согласия другой стороны.
 
-Исходный архив v1.0.1 проверялся на мокированных данных (220 сообщений, 3 страницы, 2 JSON-части), но реальный запуск в конкретной сборке Revenge Android ещё не проверен.
+Версия **1.0.2** исправляет ссылку установки и добавляет поле `hash` в манифест, необходимое загрузчику Revenge Classic / Vendetta. Реальную установку в конкретной сборке Revenge Android ещё нужно проверить.
