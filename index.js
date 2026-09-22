@@ -10,7 +10,6 @@
   const clipboard = V.metro.common.clipboard;
   const colors = { bg: "#171422", panel: "#272036", text: "#FAEDF6", soft: "#D7B7CF", faded: "#A99BB2", accent: "#F3C7DF", green: "#B6E3CA", danger: "#F5ABBD" };
   const h = R.createElement;
-  const exportRoot = "MeldixChatArchive";
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const clean = s => String(s ?? "").replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "");
   const dt = value => { try { return new Date(value).toISOString(); } catch (_) { return ""; } };
@@ -103,7 +102,8 @@
     if(activeRun) throw Error("Экспорт уже запущен.");
     const {channelStore,currentUser,http}=resolveDependencies();
     const meta=validateChannel(rawId,channelStore,currentUser);
-    const file=exportRoot + "/chat-" + meta.id + "-" + Date.now() + ".txt";
+    const file="chat-" + meta.id + "-" + Date.now() + ".txt";
+    lastFile="";
     const messages=[];
     let oldest=null, pages=0, complete=false, error="";
     activeRun={stop:false};
