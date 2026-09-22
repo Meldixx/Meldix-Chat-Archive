@@ -6,7 +6,27 @@
   const R = V.metro.common.React;
   const RN = V.metro.common.ReactNative;
   const metro = V.metro;
-  const manager = globalThis.nativeModuleProxy?.DCDFileManager || globalThis.nativeModuleProxy?.RTNFileManager;
+  // Discord exposes its file module under different names and through different
+  // React Native registries depending on Android / Revenge version.
+  function resolveFileManager() {
+    const names = ["NativeFileModule", "RTNFileManager", "DCDFileManager"];
+    const registries = [RN?.NativeModules, globalThis.nativeModuleProxy];
+    for (const name of names) {
+      for (const registry of registries) {
+        try {
+          const mod = registry?.[name];
+          if (typeof mod?.writeFile === "function") return mod;
+        } catch (_) {}
+      }
+      try {
+        const mod = typeof globalThis.__turboModuleProxy === "function"
+          ? globalThis.__turboModuleProxy(name)
+          : null;
+        if (typeof mod?.writeFile === "function") return mod;
+      } catch (_) {}
+    }
+    throw Error("В этой сборке Discord не найден модуль сохранения TXT (NativeFileModule / RTNFileManager / DCDFileManager). Экспорт не запускается, чтобы не потерять переписку.");
+  }
   const clipboard = V.metro.common.clipboard;
   const colors = { bg: "#171422", panel: "#272036", text: "#FAEDF6", soft: "#D7B7CF", faded: "#A99BB2", accent: "#F3C7DF", green: "#B6E3CA", danger: "#F5ABBD" };
   const h = R.createElement;
@@ -95,13 +115,13 @@
     return "[" + date + "] " + message.author + ": " + body.join("\n");
   }
   async function save(path, data) {
-    if(!manager?.writeFile) throw Error("Не найден FileManager; нельзя сохранить TXT.");
-    return manager.writeFile("documents", path, data, "utf8");
+    return resolveFileManager().writeFile("documents", path, data, "utf8");
   }
   async function exportChat(rawId, onProgress) {
     if(activeRun) throw Error("Экспорт уже запущен.");
     const {channelStore,currentUser,http}=resolveDependencies();
     const meta=validateChannel(rawId,channelStore,currentUser);
+    resolveFileManager(); // Check save capability BEFORE downloading a possibly long chat.
     const file="chat-" + meta.id + "-" + Date.now() + ".txt";
     lastFile="";
     const messages=[];
@@ -149,7 +169,10 @@
   }
   async function shareFile(){
     if(!lastFile)throw Error("Сначала собери переписку.");
-    const path=manager.getConstants().DocumentsDirPath+"/"+lastFile;
+    const manager=resolveFileManager();
+    const dir=manager.getConstants?.()?.DocumentsDirPath || manager.DocumentsDirPath;
+    if(!dir)throw Error("Файл сохранён, но Android не сообщил путь к Documents. Имя TXT: "+lastFile);
+    const path=dir+"/"+lastFile;
     if(typeof RN.Share?.share==="function"){
       try {
         await RN.Share.share({url:"file://"+path,title:"Meldix Chat Archive"});
