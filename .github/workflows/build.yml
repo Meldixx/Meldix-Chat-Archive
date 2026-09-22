@@ -1,0 +1,30 @@
+name: Build Revenge Classic plugin
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/index.js.gz.b64
+      - .github/workflows/build.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Build standalone plugin
+        shell: bash
+        run: |
+          base64 -d src/index.js.gz.b64 | gzip -d > index.js
+          test -s index.js
+          node --check index.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'Build Revenge Classic index.js'
+            git push
+          fi
