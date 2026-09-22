@@ -202,7 +202,8 @@
           // Discord gives messages newest-first; the TXT is strictly oldest-first.
           messages.sort((a,b)=>a.timestamp.localeCompare(b.timestamp) || a.id.length-b.id.length || a.id.localeCompare(b.id));
           const txt=messages.map(toTxt).filter(Boolean).join("\n\n") + "\n";
-          pendingFile=await saveTemp(file,txt);
+          // UTF-8 BOM makes Chrome / Android content viewers detect Cyrillic correctly.
+          pendingFile=await saveTemp(file,"\uFEFF"+txt);
         }
       } catch(e) {
         error+=(error?"; ":"")+"Ошибка сохранения: "+String(e?.message||e);
