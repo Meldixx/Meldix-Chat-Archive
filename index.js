@@ -250,6 +250,6 @@
   return {
     onLoad(){V.logger?.log?.("Meldix Chat Archive loaded (no automatic reads)");},
     onUnload(){if(activeRun)activeRun.stop=true;notifyStatus=()=>{};},
-    settings:h(Settings)
+    settings:Settings
   };
 })()
