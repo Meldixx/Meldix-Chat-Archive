@@ -27,16 +27,14 @@
     }
     throw Error("В этой сборке Discord не найден модуль сохранения TXT (NativeFileModule / RTNFileManager / DCDFileManager). Экспорт не запускается, чтобы не потерять переписку.");
   }
-  const clipboard = V.metro.common.clipboard;
   const colors = { bg: "#171422", panel: "#272036", text: "#FAEDF6", soft: "#D7B7CF", faded: "#A99BB2", accent: "#F3C7DF", green: "#B6E3CA", danger: "#F5ABBD" };
   const h = R.createElement;
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const clean = s => String(s ?? "").replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "");
   const dt = value => { try { return new Date(value).toISOString(); } catch (_) { return ""; } };
   let activeRun = null;
-  let lastFile = "";
+  let pendingFile = null, savedFile = null;
   let notifyStatus = () => {};
-  function status(message) { notifyStatus(message); }
   function find(...names) {
     const f = metro.findByProps || metro.filters?.findByProps;
     return typeof f === "function" ? f(...names) : null;
@@ -114,16 +112,65 @@
     const date = message.timestamp ? message.timestamp.replace("T", " ").replace(/\.\d{3}Z$/, " UTC") : "дата неизвестна";
     return "[" + date + "] " + message.author + ": " + body.join("\n");
   }
-  async function save(path, data) {
-    return resolveFileManager().writeFile("documents", path, data, "utf8");
+  // Android scoped storage: public Downloads is written through the system's
+  // ACTION_CREATE_DOCUMENT picker, not via private app Documents or raw /Download.
+  function resolveSavePicker() {
+    const module = find("pick", "saveDocuments") || find("saveDocuments");
+    const picker = module?.saveDocuments ? module : module?.default?.saveDocuments ? module.default : null;
+    if (typeof picker?.saveDocuments !== "function") {
+      throw Error("В этой версии Discord отсутствует системное «Сохранить как…». Нужна сборка с @react-native-documents/picker (saveDocuments).");
+    }
+    return picker;
+  }
+  async function saveTemp(file, data) {
+    const manager=resolveFileManager();
+    const result=await manager.writeFile("cache",file,data,"utf8");
+    const path=typeof result==="string"&&result.length?result:
+      (manager.getConstants?.()?.CacheDirPath || manager.CacheDirPath || "")+"/"+file;
+    if(!path || path==="/"+file)throw Error("TXT подготовлен, но Android не сообщил путь временного файла.");
+    return {file,manager,path};
+  }
+  function asFileUri(path) {
+    if(path.startsWith("file://"))return path;
+    if(!path.startsWith("/"))throw Error("Android вернул неожиданный путь файла: "+path);
+    return "file://"+path;
+  }
+  function cancelledSave(error) {
+    return /cancel|cancell|отмен/i.test(String(error?.code||error?.message||error||""));
+  }
+  async function saveToDownloads(){
+    if(!pendingFile)throw Error("Сначала собери переписку.");
+    const picker=resolveSavePicker();
+    const file=pendingFile;
+    let saved;
+    try {
+      // Android opens a system save dialog. The user picks Downloads and taps Save.
+      const result=await picker.saveDocuments({
+        sourceUris:[asFileUri(file.path)],
+        mimeType:"text/plain",
+        fileName:file.file
+      });
+      saved=result?.[0];
+    } catch(error) {
+      if(cancelledSave(error))return {cancelled:true};
+      throw Error("Не получилось открыть сохранение Android: "+String(error?.message||error));
+    }
+    if(saved?.error)throw Error("Android не сохранил TXT: "+saved.error);
+    if(!saved?.uri)throw Error("Android не подтвердил сохранение TXT. Нажми «Сохранить в Загрузки» ещё раз.");
+    savedFile={name:saved.name||file.file,uri:saved.uri};
+    pendingFile=null;
+    try {await file.manager.removeFile?.("cache",file.file)} catch (_) {}
+    return {saved:true,name:savedFile.name,uri:savedFile.uri};
   }
   async function exportChat(rawId, onProgress) {
     if(activeRun) throw Error("Экспорт уже запущен.");
     const {channelStore,currentUser,http}=resolveDependencies();
     const meta=validateChannel(rawId,channelStore,currentUser);
-    resolveFileManager(); // Check save capability BEFORE downloading a possibly long chat.
+    resolveFileManager(); // Validate both prerequisites before downloading a long chat.
+    resolveSavePicker();
     const file="chat-" + meta.id + "-" + Date.now() + ".txt";
-    lastFile="";
+    pendingFile=null;
+    savedFile=null;
     const messages=[];
     let oldest=null, pages=0, complete=false, error="";
     activeRun={stop:false};
@@ -155,35 +202,16 @@
           // Discord gives messages newest-first; the TXT is strictly oldest-first.
           messages.sort((a,b)=>a.timestamp.localeCompare(b.timestamp) || a.id.length-b.id.length || a.id.localeCompare(b.id));
           const txt=messages.map(toTxt).filter(Boolean).join("\n\n") + "\n";
-          await save(file,txt);
-          lastFile=file;
+          pendingFile=await saveTemp(file,txt);
         }
       } catch(e) {
         error+=(error?"; ":"")+"Ошибка сохранения: "+String(e?.message||e);
-        lastFile="";
+        pendingFile=null;
       }
       activeRun=null;
     }
-    if(error && !lastFile)throw Error(error);
-    return {complete,count:messages.length,file:lastFile,reason:error};
-  }
-  async function shareFile(){
-    if(!lastFile)throw Error("Сначала собери переписку.");
-    const manager=resolveFileManager();
-    const dir=manager.getConstants?.()?.DocumentsDirPath || manager.DocumentsDirPath;
-    if(!dir)throw Error("Файл сохранён, но Android не сообщил путь к Documents. Имя TXT: "+lastFile);
-    const path=dir+"/"+lastFile;
-    if(typeof RN.Share?.share==="function"){
-      try {
-        await RN.Share.share({url:"file://"+path,title:"Meldix Chat Archive"});
-        return "Открыто меню отправки TXT.";
-      } catch(_) { /* Some Android FileProviders reject private app files. */ }
-    }
-    const content=await manager.readFile(path,"utf8");
-    if(content.length>80000)throw Error("TXT сохранён в Documents, но системная отправка файла недоступна в этой сборке. Для большого чата нужно извлечь файл через файловый менеджер/ADB.");
-    if(typeof clipboard?.setString!=="function")throw Error("Недоступен буфер обмена.");
-    await clipboard.setString(content);
-    return "Текст чата скопирован. Вставь его в файл или заметку.";
+    if(error && !pendingFile)throw Error(error);
+    return {complete,count:messages.length,file:pendingFile?.file||"",reason:error};
   }
   const styles={
     base:{flex:1,backgroundColor:colors.bg,padding:16},
@@ -202,38 +230,56 @@
   };
   function Settings(){
     const [channel,setChannel]=R.useState("");
-    const [message,setMessage]=R.useState("Экспорт одного DM в один TXT без JSON и отчётов.");
+    const [message,setMessage]=R.useState("Один TXT: после загрузки выбери папку «Загрузки» в системном окне Android.");
     const [working,setWorking]=R.useState(false);
     const mounted=R.useRef(true);
     R.useEffect(()=>{mounted.current=true;notifyStatus=m=>{if(mounted.current)setMessage(m)};return()=>{mounted.current=false;notifyStatus=()=>{}}},[]);
     const label=text=>h(RN.Text,{style:styles.label},text);
     const button=(text,fn,outline=false,disabled=false)=>h(RN.Pressable,{onPress:fn,disabled,style:[outline?styles.outline:styles.action,disabled&&{opacity:.35}]},h(RN.Text,{style:outline?styles.outlineText:styles.actionText},text));
+    async function openSave(){
+      if(!pendingFile)throw Error("Нет подготовленного TXT.");
+      setMessage("Выбери «Загрузки» в системном окне Android и нажми «Сохранить».");
+      const saved=await saveToDownloads();
+      if(saved.cancelled)setMessage("Сохранение отменено. TXT подготовлен — можно нажать «Сохранить в Загрузки» снова, не скачивая чат повторно.");
+      else setMessage("TXT сохранён через Android: "+saved.name+"\nМесто: выбранная папка (выбери «Загрузки»).");
+    }
     async function runExport(){
       if(working)return;
       setWorking(true);setMessage("Проверяю личный чат…");
       try{
         const result=await exportChat(channel,setMessage);
-        setMessage((result.complete?"Готово. ":"Неполный экспорт. ")+result.count+" сообщений.\nTXT: "+result.file+(result.reason?"\nПричина: "+result.reason:""));
-      }catch(e){setMessage("Ошибка: "+String(e?.message||e));}
+        if(!pendingFile){
+          setMessage("В доступной истории нет сообщений для TXT."+(result.reason?"\nПричина: "+result.reason:""));
+          return;
+        }
+        setMessage((result.complete?"Собрано: ":"Собрано частично: ")+result.count+" сообщений.\nОткроется системное сохранение. Выбери «Загрузки» и подтверди.");
+        await openSave();
+        if(result.reason) setMessage(prev=>prev+"\nВнимание: переписка неполная. "+result.reason);
+      }catch(e){setMessage("Ошибка: "+String(e?.message||e)+(pendingFile?"\nTXT подготовлен; попробуй кнопку сохранения ещё раз.":""));}
       finally{if(mounted.current)setWorking(false)}
     }
-    async function share(){try{setMessage(await shareFile())}catch(e){setMessage(String(e?.message||e))}}
+    async function retrySave(){
+      if(working)return;
+      setWorking(true);
+      try{await openSave()}catch(e){setMessage("Ошибка сохранения: "+String(e?.message||e));}
+      finally{if(mounted.current)setWorking(false)}
+    }
     return h(RN.ScrollView,{style:styles.base,contentContainerStyle:{paddingBottom:55}},
       h(RN.Text,{style:styles.heading},"Meldix Chat Archive"),
-      h(RN.Text,{style:styles.subtitle},"Вся доступная переписка выбранного личного чата одним файлом chat-....txt, от старых сообщений к новым."),
+      h(RN.Text,{style:styles.subtitle},"Экспорт одного DM в один TXT. После загрузки откроется окно Android: выбери «Загрузки» (Downloads)."),
       h(RN.View,{style:styles.card},label("ID личного DM-канала"),
         h(RN.TextInput,{style:styles.input,placeholder:"ID канала или ссылка на сообщение",placeholderTextColor:colors.faded,value:channel,onChangeText:setChannel,autoCorrect:false}),
         h(RN.Text,{style:styles.info},"Вставь ссылку на сообщение из личного чата либо ID самого DM-канала, не пользователя."),
-        button("Собрать чат в TXT",runExport,false,working || !!activeRun),
-        button("Остановить и сохранить полученное",()=>{if(activeRun){activeRun.stop=true;setMessage("Останавливаю и сохраняю один TXT…")}},true,!working)
+        button("Собрать чат и сохранить в Загрузки",runExport,false,working || !!activeRun),
+        button("Остановить и сохранить полученное",()=>{if(activeRun){activeRun.stop=true;setMessage("Останавливаю; затем выбери «Загрузки»…")}},true,!activeRun)
       ),
       h(RN.View,{style:styles.card},label("Экспорт"),h(RN.Text,{style:styles.line},message)),
-      h(RN.View,{style:styles.card},label("Готовый TXT"),
-        h(RN.Text,{style:styles.info},lastFile||"Файла пока нет"),
-        button("Поделиться одним TXT",share,false,!lastFile)
+      h(RN.View,{style:styles.card},label("Один TXT в Загрузках"),
+        h(RN.Text,{style:styles.info},savedFile?"Сохранён: "+savedFile.name:pendingFile?"Готов к сохранению: "+pendingFile.file:"Пока не сохранён"),
+        button("Сохранить в Загрузки",retrySave,false,working || !pendingFile)
       ),
       h(RN.View,{style:styles.card},label("Приватность"),
-        h(RN.Text,{style:styles.info},"Экспорт доступной истории одного DM: дата, время UTC, автор, текст и названия вложений/стикеров. Нет сторонних серверов, отчётов и JSON. Личные сообщения не публикуй без согласия второй стороны."))
+        h(RN.Text,{style:styles.info},"Один TXT с датами UTC, авторами и сообщениями. Система попросит выбрать место сохранения; открой «Загрузки» и нажми «Сохранить». Файл будет доступен через обычный файловый менеджер. Это личная переписка — не публикуй без согласия второго участника."))
     );
   }
   return {
