@@ -1,0 +1,15 @@
+{
+  "name": "Meldix Chat Archive",
+  "description": "Voluntary local export of a selected one-to-one DM for quote-backed website memories. No external upload.",
+  "authors": [
+    {
+      "name": "Meldix",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "vendetta": {
+    "icon": "ic_chat_24px"
+  },
+  "version": "1.0.1"
+}
