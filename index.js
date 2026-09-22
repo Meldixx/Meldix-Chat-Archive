@@ -11,13 +11,11 @@
   const colors = { bg: "#171422", panel: "#272036", text: "#FAEDF6", soft: "#D7B7CF", faded: "#A99BB2", accent: "#F3C7DF", green: "#B6E3CA", danger: "#F5ABBD" };
   const h = R.createElement;
   const exportRoot = "MeldixChatArchive";
-  const chunkSize = 200;
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const clean = s => String(s ?? "").replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "");
-  const safeFile = s => String(s ?? "archive").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 70);
   const dt = value => { try { return new Date(value).toISOString(); } catch (_) { return ""; } };
   let activeRun = null;
-  let lastFolder = "", lastFiles = [], lastIndex = 0;
+  let lastFile = "";
   let notifyStatus = () => {};
   function status(message) { notifyStatus(message); }
   function find(...names) {
@@ -88,107 +86,81 @@
     }
     throw Error("Лимит Discord: повтори позже.");
   }
-  function simplify(text) { return clean(text).replace(/\s+/g, " ").trim(); }
-  const topics = [
-    { label: "Ведьмак 3 / игры", re: /ведьмак|witcher|геральт|гвинт|квест|играем|поиграем|катка|игр[аыу]/i },
-    { label: "Discord / войс", re: /дискорд|discord|войс|созвон|голосов|микрофон|зайди|зайду в войс/i },
-    { label: "Ночь / сон", re: /ноч[ьи]|спокойной|спать|высп|проснул|утром|поздно|ещё пять минут/i },
-    { label: "Мяу / коты", re: /мяу|кот[ауы]|кош[ауы]/i },
-    { label: "Забота / настроение", re: /как ты|как дела|всё хорошо|плохо|груст|пережива|отдыхай|не грусти|береги|держись/i },
-    { label: "Расстояние / страны", re: /украин|герман|далеко|расстоян|приех|встрет|погуля/i },
-    { label: "Юмор / подколы", re: /ахах|хахах|лол|шут|прик[оа]л|иди нахуй|иди на хуй|ржу|ору/i }
-  ];
-  function createStats() { return { total:0, first:null, last:null, users:{}, words:{}, topics:topics.map(t=>({name:t.label, count:0, examples:[]})), samples:[], daySet:{}, attachmentCount:0, replyCount:0 }; }
-  function updateStats(stats, m) {
-    stats.total++;
-    stats.first = !stats.first || m.timestamp < stats.first ? m.timestamp : stats.first;
-    stats.last = !stats.last || m.timestamp > stats.last ? m.timestamp : stats.last;
-    const key=m.authorId || "unknown";
-    stats.users[key] = stats.users[key] || {name:m.author,count:0,own:m.own};stats.users[key].count++;
-    stats.attachmentCount += m.attachments.length;
-    if (m.replyTo) stats.replyCount++;
-    if(m.timestamp) stats.daySet[m.timestamp.slice(0,10)]=true;
-    const text=simplify(m.text);
-    if(!text)return;
-    for(const [name,re] of topics.map(t=>[t.label,t.re])){
-      if(re.test(text)){
-        const t=stats.topics.find(s=>s.name===name);t.count++;
-        if(t.examples.length<16) t.examples.push({date:m.timestamp,by:m.author,own:m.own,text:text.slice(0,280),id:m.id});
-      }
-    }
-    if(stats.samples.length<25 && text.length>=22 && text.length<300 && !/https?:\/\//i.test(text))stats.samples.push({by:m.author,text,id:m.id});
-  }
-  function buildReport(stats, meta, complete, parts) {
-    const userLines=Object.values(stats.users).map(u=>`- ${u.name} (${u.own?"ты":"собеседница"}): ${u.count}`).join("\n");
-    const head=`# Наши сообщения — черновик для сайта\n\nЭкспорт: ${new Date().toISOString()}\nЛичный чат: ${meta.id}\nСобеседница: ${meta.other}\nСтатус: ${complete?"завершён (достигнуто начало доступной истории)":"НЕПОЛНЫЙ — прерван или возникла ошибка"}\nПолучено: ${stats.total} сообщений; сохранено частей: ${parts}; дней переписки: ${Object.keys(stats.daySet).length}.\nСамое раннее доступное: ${stats.first||"неизвестно"}; самое позднее: ${stats.last||"неизвестно"}.\nВложения (метаданные): ${stats.attachmentCount}.\n\n## Авторы\n${userLines}\n\n## Подтверждённые повторяющиеся темы\n`;
-    const body=stats.topics.filter(t=>t.count).sort((a,b)=>b.count-a.count).map(t=>`### ${t.name} — ${t.count} сообщений с совпадениями\n${t.examples.slice(0,10).map(x=>`- ${x.date} · ${x.by}: «${x.text.replace(/\n/g," ")}» [id:${x.id}]`).join("\n")}`).join("\n\n");
-    const tail="\n\n## Как использовать для сайта\n- Не выдавать фрагменты за дословную цитату, если они сокращены. Сверять по id с полным архивом.\n- Отличать его слова от её слов. Нельзя утверждать её чувства по одному сообщению.\n- Не помещать в публичный сайт адреса, номера, пароли, медицинские детали, интимные сообщения и другие частные сведения.\n- Уточнять контекст шуток: частые совпадения — ещё не показатель важности.\n- Если написано НЕПОЛНЫЙ, не делать выводы обо всей истории.\n";
-    return head+(body||"Совпадений по встроенным темам нет. Проверяй полный архив.")+tail;
+  function toTxt(message) {
+    const body = [];
+    if (message.text && message.text.trim()) body.push(message.text.replace(/\r\n?/g, "\n"));
+    for (const attachment of message.attachments) body.push("[вложение: " + clean(attachment.name).replace(/\s+/g, " ").trim() + "]");
+    for (const sticker of message.stickers) body.push("[стикер: " + clean(sticker.name).replace(/\s+/g, " ").trim() + "]");
+    if (!body.length) return "";
+    const date = message.timestamp ? message.timestamp.replace("T", " ").replace(/\.\d{3}Z$/, " UTC") : "дата неизвестна";
+    return "[" + date + "] " + message.author + ": " + body.join("\n");
   }
   async function save(path, data) {
-    if(!manager?.writeFile)throw Error("Не найден FileManager; нельзя безопасно сохранить экспорт.");
+    if(!manager?.writeFile) throw Error("Не найден FileManager; нельзя сохранить TXT.");
     return manager.writeFile("documents", path, data, "utf8");
   }
   async function exportChat(rawId, onProgress) {
-    if(activeRun)throw Error("Экспорт уже запущен.");
+    if(activeRun) throw Error("Экспорт уже запущен.");
     const {channelStore,currentUser,http}=resolveDependencies();
     const meta=validateChannel(rawId,channelStore,currentUser);
-    const folder=`${exportRoot}/${safeFile(meta.id)}-${Date.now()}`;
-    let oldest=null,prevOldest=null,page=0,part=0,total=0,complete=false,lastErr="";
-    let buffer=[],seen=new Set(),stats=createStats(),files=[];
+    const file=exportRoot + "/chat-" + meta.id + "-" + Date.now() + ".txt";
+    const messages=[];
+    let oldest=null, pages=0, complete=false, error="";
     activeRun={stop:false};
-    async function flush(){
-      if(!buffer.length)return;
-      part++;const file=`${folder}/messages-${String(part).padStart(4,"0")}.json`;
-      const data={format:"MeldixChatArchive-1",channel:meta.id,users:[meta.me,meta.other],part,complete:false,messages:buffer.slice().reverse()};
-      await save(file,JSON.stringify(data,null,2));
-      files.push(file);buffer=[];
-    }
     try {
-      while(!activeRun.stop){
-        const result=await fetchPage(http,meta.id,oldest);
-        page++;if(!result.length){complete=true;break;}
-        seen.clear();
-        for(const raw of result){
-          if(!raw?.id||seen.has(raw.id))continue;seen.add(raw.id);
-          const msg=formatMessage(raw,meta.me);buffer.push(msg);updateStats(stats,msg);total++;
-          if(buffer.length>=chunkSize)await flush();
+      while(!activeRun.stop) {
+        const page=await fetchPage(http,meta.id,oldest);
+        pages++;
+        if(!page.length){complete=true;break;}
+        const seen=new Set();
+        for(const raw of page) {
+          if(!raw?.id || seen.has(raw.id))continue;
+          seen.add(raw.id);
+          const msg=formatMessage(raw,meta.me);
+          if(toTxt(msg))messages.push(msg);
         }
-        const last=result[result.length-1];
-        prevOldest=oldest;oldest=String(last?.id||"");
-        if(!oldest||oldest===prevOldest)throw Error("Пагинация остановилась: Discord вернул повторную страницу.");
-        onProgress(`Загружено ${total} сообщений · страниц ${page} · частей ${part}${buffer.length?' + '+buffer.length+' в памяти':''}`);
-        // Discord history is exhausted when the page contains fewer than 100 entries.
-        if(result.length<100){complete=true;break;}
+        const next=String(page[page.length-1]?.id||"");
+        if(!next||next===oldest)throw Error("Пагинация остановилась: Discord вернул повторную страницу.");
+        oldest=next;
+        onProgress("Загружено " + messages.length + " сообщений · страниц " + pages + ". По завершении будет один TXT.");
+        if(page.length<100){complete=true;break;}
         await wait(450);
       }
-      if(activeRun.stop)lastErr="Остановлено вручную";
-    }catch(e){lastErr=String(e?.message||e);}
-    finally{
+      if(activeRun.stop)error="Остановлено вручную";
+    } catch(e) {
+      error=String(e?.message||e);
+    } finally {
       try {
-        await flush();
-        const index={version:1,dmId:meta.id,otherId:meta.other,selfId:meta.me,complete,reason:lastErr||null,messages:total,parts:files.map(f=>f.split('/').pop()).reverse(),firstDate:stats.first,lastDate:stats.last,generated:new Date().toISOString()};
-        files.push(`${folder}/index.json`);await save(files[files.length-1],JSON.stringify(index,null,2));
-        files.push(`${folder}/site-notes.md`);await save(files[files.length-1],buildReport(stats,meta,complete,part));
-        lastFiles=files;lastFolder=folder;lastIndex=files.length-1;
-      }catch(e){lastErr+=(lastErr?"; ":"")+`Сохранение: ${String(e?.message||e)}`;}
+        if(messages.length) {
+          // Discord gives messages newest-first; the TXT is strictly oldest-first.
+          messages.sort((a,b)=>a.timestamp.localeCompare(b.timestamp) || a.id.length-b.id.length || a.id.localeCompare(b.id));
+          const txt=messages.map(toTxt).filter(Boolean).join("\n\n") + "\n";
+          await save(file,txt);
+          lastFile=file;
+        }
+      } catch(e) {
+        error+=(error?"; ":"")+"Ошибка сохранения: "+String(e?.message||e);
+        lastFile="";
+      }
       activeRun=null;
     }
-    return {complete,count:total,parts:part,folder,files,reason:lastErr};
+    if(error && !lastFile)throw Error(error);
+    return {complete,count:messages.length,file:lastFile,reason:error};
   }
-  async function shareFile(index){
-    if(!lastFiles.length)throw Error("Сначала запусти экспорт.");
-    const file=lastFiles[index]||lastFiles[lastFiles.length-1];
-    const path=`${manager.getConstants().DocumentsDirPath}/${file}`;
+  async function shareFile(){
+    if(!lastFile)throw Error("Сначала собери переписку.");
+    const path=manager.getConstants().DocumentsDirPath+"/"+lastFile;
     if(typeof RN.Share?.share==="function"){
-      try { await RN.Share.share({url:`file://${path}`,title:"Meldix Chat Archive"});return "Запрошено системное меню отправки файла."; }
-      catch(_){ /* Android FileProvider may reject private app file:// paths. */ }
+      try {
+        await RN.Share.share({url:"file://"+path,title:"Meldix Chat Archive"});
+        return "Открыто меню отправки TXT.";
+      } catch(_) { /* Some Android FileProviders reject private app files. */ }
     }
-    const text=await manager.readFile(path,"utf8");
-    if(text.length>80000)throw Error("Файл больше 80 000 символов. Он сохранён в Documents, но системная отправка недоступна. Извлеки через ADB или экспортируй следующую часть через менеджер файлов.");
-    if(typeof clipboard?.setString!=="function")throw Error("Недоступен системный буфер обмена.");
-    await clipboard.setString(text);
-    return "Файл скопирован в буфер обмена. Вставь в локальную заметку; не отправляй в публичный чат.";
+    const content=await manager.readFile(path,"utf8");
+    if(content.length>80000)throw Error("TXT сохранён в Documents, но системная отправка файла недоступна в этой сборке. Для большого чата нужно извлечь файл через файловый менеджер/ADB.");
+    if(typeof clipboard?.setString!=="function")throw Error("Недоступен буфер обмена.");
+    await clipboard.setString(content);
+    return "Текст чата скопирован. Вставь его в файл или заметку.";
   }
   const styles={
     base:{flex:1,backgroundColor:colors.bg,padding:16},
@@ -207,44 +179,38 @@
   };
   function Settings(){
     const [channel,setChannel]=R.useState("");
-    const [message,setMessage]=R.useState("Выбери ТОЛЬКО конкретный личный чат. Начало: ввод ID канала.");
+    const [message,setMessage]=R.useState("Экспорт одного DM в один TXT без JSON и отчётов.");
     const [working,setWorking]=R.useState(false);
-    const [fileIndex,setFileIndex]=R.useState(lastIndex);
     const mounted=R.useRef(true);
     R.useEffect(()=>{mounted.current=true;notifyStatus=m=>{if(mounted.current)setMessage(m)};return()=>{mounted.current=false;notifyStatus=()=>{}}},[]);
-    const label=(text)=>h(RN.Text,{style:styles.label},text);
+    const label=text=>h(RN.Text,{style:styles.label},text);
     const button=(text,fn,outline=false,disabled=false)=>h(RN.Pressable,{onPress:fn,disabled,style:[outline?styles.outline:styles.action,disabled&&{opacity:.35}]},h(RN.Text,{style:outline?styles.outlineText:styles.actionText},text));
     async function runExport(){
       if(working)return;
       setWorking(true);setMessage("Проверяю личный чат…");
       try{
         const result=await exportChat(channel,setMessage);
-        setMessage((result.complete?"Готово. ":"Частичный экспорт. ")+`${result.count} сообщений, ${result.parts} файлов истории.\nПапка: ${result.folder}`+(result.reason?"\nПричина: "+result.reason:""));
-        setFileIndex(lastFiles.length-1);
+        setMessage((result.complete?"Готово. ":"Неполный экспорт. ")+result.count+" сообщений.\nTXT: "+result.file+(result.reason?"\nПричина: "+result.reason:""));
       }catch(e){setMessage("Ошибка: "+String(e?.message||e));}
       finally{if(mounted.current)setWorking(false)}
     }
-    async function share(){try{setMessage(await shareFile(fileIndex))}catch(e){setMessage(String(e?.message||e))}}
+    async function share(){try{setMessage(await shareFile())}catch(e){setMessage(String(e?.message||e))}}
     return h(RN.ScrollView,{style:styles.base,contentContainerStyle:{paddingBottom:55}},
       h(RN.Text,{style:styles.heading},"Meldix Chat Archive"),
-      h(RN.Text,{style:styles.subtitle},"Локальный экспорт ОДНОГО личного чата и подборка фактических цитат для будущего сайта. Плагин не делает выводов о её чувствах."),
+      h(RN.Text,{style:styles.subtitle},"Вся доступная переписка выбранного личного чата одним файлом chat-....txt, от старых сообщений к новым."),
       h(RN.View,{style:styles.card},label("ID личного DM-канала"),
-        h(RN.TextInput,{style:styles.input,placeholder:"Например, 1234567890123456789",placeholderTextColor:colors.faded,keyboardType:"numeric",value:channel,onChangeText:setChannel,autoCorrect:false}),
-        h(RN.Text,{style:styles.info},"Скопируй ссылку на сообщение из нужного DM: discord.com/channels/@me/ID/ID. Можно вставить ссылку целиком либо только ID канала. НЕ ID пользователя. Группы и серверы запрещены."),
-        button("Собрать доступную историю",runExport,false,working || !!activeRun),
-        button("Остановить после текущего запроса",()=>{if(activeRun){activeRun.stop=true;setMessage("Останавливаю и сохраняю то, что уже собрано…")}},true,!activeRun)
+        h(RN.TextInput,{style:styles.input,placeholder:"ID канала или ссылка на сообщение",placeholderTextColor:colors.faded,value:channel,onChangeText:setChannel,autoCorrect:false}),
+        h(RN.Text,{style:styles.info},"Вставь ссылку на сообщение из личного чата либо ID самого DM-канала, не пользователя."),
+        button("Собрать чат в TXT",runExport,false,working || !!activeRun),
+        button("Остановить и сохранить полученное",()=>{if(activeRun){activeRun.stop=true;setMessage("Останавливаю и сохраняю один TXT…")}},true,!working)
       ),
-      h(RN.View,{style:styles.card},label("Ход экспорта"),h(RN.Text,{style:styles.line},message)),
-      h(RN.View,{style:styles.card},label("Готовые файлы"),
-        h(RN.Text,{style:styles.info},`Папка: ${lastFolder||"ещё нет"}\nФайлов: ${lastFiles.length}. Включает index.json и site-notes.md.`),
-        button("Предыдущий файл",()=>setFileIndex(i=>Math.max(0,i-1)),true,!lastFiles.length||fileIndex===0),
-        button("Следующий файл",()=>setFileIndex(i=>Math.min(lastFiles.length-1,i+1)),true,!lastFiles.length||fileIndex>=lastFiles.length-1),
-        h(RN.Text,{style:styles.line},lastFiles[fileIndex]||"Нет выбранного файла"),
-        button("Поделиться / скопировать выбранный файл",share,false,!lastFiles.length),
-        button("Выбрать отчёт для сайта",()=>setFileIndex(lastFiles.length-1),true,!lastFiles.length)
+      h(RN.View,{style:styles.card},label("Экспорт"),h(RN.Text,{style:styles.line},message)),
+      h(RN.View,{style:styles.card},label("Готовый TXT"),
+        h(RN.Text,{style:styles.info},lastFile||"Файла пока нет"),
+        button("Поделиться одним TXT",share,false,!lastFile)
       ),
-      h(RN.View,{style:styles.card},label("Приватность и точность"),
-        h(RN.Text,{style:styles.info},"Только личный чат с подтверждённым вторым участником. Обращения идут лишь к Discord через его внутренний клиент. Токен не извлекается и не записывается. Вебхуки/облачные AI отсутствуют. Вложения сохраняются только как метаданные без загрузки файлов. Экспорт содержит личные сообщения обоих участников: храни безопасно и не публикуй без согласия. Удалённые или недоступные сообщения восстановить нельзя."))
+      h(RN.View,{style:styles.card},label("Приватность"),
+        h(RN.Text,{style:styles.info},"Экспорт доступной истории одного DM: дата, время UTC, автор, текст и названия вложений/стикеров. Нет сторонних серверов, отчётов и JSON. Личные сообщения не публикуй без согласия второй стороны."))
     );
   }
   return {
