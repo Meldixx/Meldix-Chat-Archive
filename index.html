@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171422"><title>Meldix Chat Archive · Revenge Classic</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;background:radial-gradient(ellipse at 82% 5%,#9d6e9540,transparent 48%),#171422;color:#faeff5;font:15px/1.75 system-ui,sans-serif;padding:24px}
+main{width:min(610px,100%);border:1px solid #f3d6e147;background:#ffffff09;padding:clamp(24px,6vw,45px);border-radius:26px;box-shadow:0 28px 110px #07030a55}h1{font-size:clamp(30px,6vw,45px);line-height:1.1;letter-spacing:-.05em;margin:15px 0}.tag{font-size:11px;font-weight:800;letter-spacing:.14em;color:#e2b5d1;text-transform:uppercase}p,small{color:#d6c4d8}small{display:block;margin-top:20px;font-size:12px}
+code{display:block;overflow-wrap:anywhere;padding:16px;border:1px solid #f6d7eb35;background:#100d1b;color:#f6d7eb;margin:18px 0;border-radius:13px}
+.actions{display:flex;gap:12px;flex-wrap:wrap}a,button{display:inline-flex;align-items:center;justify-content:center;min-height:43px;text-decoration:none;border:1px solid #f4cce076;border-radius:13px;padding:9px 17px;background:#efc5da;color:#25172a;font:700 13px system-ui,sans-serif;cursor:pointer}a{background:#ffffff12;color:#fff}
+</style></head><body><main><div class="tag">Revenge Classic · Android</div><h1>Meldix Chat Archive</h1>
+<p>Локальный экспорт переписки одного личного чата и подборка реальных цитат для сайта. Никаких отправок переписки на GitHub или сторонний сервер.</p>
+<p>Установка: <b>Settings → Plugins → +</b>. Вставь адрес каталога плагина:</p>
+<code id="install">https://raw.githubusercontent.com/Meldixx/Meldix-Chat-Archive/main/</code>
+<div class="actions"><button id="copy">Скопировать адрес</button><a href="manifest.json">Манифест</a><a href="https://github.com/Meldixx/Meldix-Chat-Archive">GitHub</a></div>
+<small>Совместимость: Revenge Classic / Vendetta, не Revenge Next. Текущая версия: 1.0.1. GitHub Pages не требуется для RAW-ссылки. Реальная установка на твоей сборке Android ещё не проверена.</small></main>
+<script>document.getElementById('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(document.getElementById('install').textContent);document.getElementById('copy').textContent='Скопировано'}catch(e){document.getElementById('copy').textContent='Скопируй адрес из блока выше'}})</script></body></html>
